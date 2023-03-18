@@ -1,0 +1,62 @@
+NETCOIN DATA STRUCTURES
+
+BLOCK:
+	height: number | block height (0,1,2,...) in the blockchain (genesis block has height 0, second block has height 1, etc.)
+	uuid: string | unique block identifier (16 char long string, a-zA-Z0-9)
+	timestamp: number | timestamp of the block
+	previous: string | uuid of previous block
+	transactions: table | table of block transactions
+	nonce: number | block solution. It must satisfy that sha256(nonce .. sha256(uuid .. height .. timestamp .. previous .. hash(transactions))) <= target
+	target: number | block target, it is adjusted every 50 blocks (targeting 5 real minutes/block). Maximum target is 1 >> 240 (2^16 = 65535 hashes para encontrar un bloque).
+	
+TRANSACTION:
+	id: string | unique transaction identifier (32 char-long string, a-zA-Z0-9), x :(a-Z | 0-9)
+	from: string | emmiter public key
+	to: string | beneficiary public key
+	qty: number | NTC to transfer
+	sources: {table|nil} | Origin transactions table. Every transaction t of this table must verify that source[i].to==this.from. It also must hold that sum(source[i].qty)>=this.qty. It this is nil, this is considered a NTC block reward transaction, and only one can appear in each block at maximum.
+	rem: number | NTC remainder to be refunded to the emmiter, therefore, sum(source[i].qty) == this.qty + this.rem
+	sig: string | signature of this transactions. It holds that ecdsa(serialize(this), this.from, this.sig)==true
+
+BLOCKCHAIN STORAGE
+All blocks emmited are stored by the network as long as they are valid, even if they are not part of the main branch of the blockchain (orphaned blocks).
+To calculate the amount of NTC a user has, the system does an exhaustive search from the stored block with most height, and sums all the transactions in the blocks, until the genesis block. This sum, obviously, must be always >= 0.
+
+This can involve a lot of computational work. Therefore, a node can prune part of the blockchain, storing in a specific height the balance of all accounts known by the network.
+A node that does this is not considered a full node and cannot verify transactions. But a full node that does store the full blockchain can act as a "proxy server" for a light node to process transactions and publish them.
+Full nodes, however, can store unspent transaction outputs (UTXOs) caches in order to better reconstruct the UTXO pool when a conflict in the chain occurs.
+
+Every block has a maximum size of 10KB, so in a 3MB HDD up to 300 blocks can be stored.
+
+ESTRUCTURA DE LA RED NETCRAFT
+Hay esencialmente tres tipos de nodos en la red:
+
+- Nodos completos.
+- Nodos "light".
+- Mineros.
+
+1.1) NODOS COMPLETOS
+Los nodos completos almacenan la cadena de bloques completa y se encargan de verificar todos los bloques y transacciones emitidas por la red. Si alguna transacción o bloque es inválido, se desecha. De manera opcional, un nodo completo puede generar claves públicas/privadas y llevar un monedero de NTC con el cual realizar transacciones. Los nodos completos son los únicos que pueden emitir transacciones a la red. Las obligaciones de un nodo completo son:
+- Escuchar transacciones (no verificadas) emitidas por nodos completos y reenviarlas a otros nodos completos y mineros.
+- Escuchar peticiones de transacciones emitidas por nodos "light" y, de manera voluntaria, emitir una transacción correspondiente a la red (otros nodos completos y mineros).
+- Escuchar bloques emitidos por mineros y verificarlos. Reenviar dichos bloques a otros nodos completos y "light", en caso de que sean bloques válidos.
+- Escuchar peticiones de obtención de bloques emitidas por otros nodos completos y nodos "light", y atender sus peticiones enviando los datos.
+- Escuchar peticiones para encontrar otros miembros de la red emitidas por cualquier miembro de la red, y atender sus peticiones.
+- Almacenar todos los bloques emitidos por la red.
+
+1.2) NODOS "LIGHT"
+Los nodos light están pensados para actuar como monederos de NTC, para que el usuario final no tenga que afrontar los costes de almacenar toda la cadena de bloques. Los nodos "light" no tienen obligaciones, y sólo funcionan como "interfaz" entre el usuario final y la red NetCoin.
+
+1.3) MINEROS
+Los mineros se encargan de generar nuevos bloques para la red e incluir transacciones en ellos. La inclusión de transacciones en los bloques queda a decisión de los mineros. La verificación de las transacciones las hacen los nodos completos una vez publicado el bloque, pero los mineros deberían abstenerse de incluir transacciones inválidas con el fin de evitar que sus bloques sean rechazados. Los mineros tienen las siguientes obligaciones:
+- Escuchar transacciones (no verificadas) emitidas por nodos completos
+- Emitir nuevos bloques para la red
+
+IMPLEMENTACIÓN ALMACENAJE DE LA CADENA DE BLOQUES
+Con el fin de agilizar la carga de bloques desde el disco duro, se almacena en un archivo "index.txt" un índice con todos los bloques almacenados junto con su UUID en este formato:
+
+[uuid],[DiskAddress]\n
+
+uuid son 16 dígitos hexadecimales, y diskAddress almacena 2 dígitos hexadecimales del HDD. En total, cada bloque en el índice ocupa (16+1+2+1) = 20 bytes.
+
+RECÁLCULO DE LA DIFICULTAD DE MINADO
